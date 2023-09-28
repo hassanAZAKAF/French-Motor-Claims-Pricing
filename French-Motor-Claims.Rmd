@@ -1,0 +1,771 @@
+---
+title: "French Motor Claims"
+output:
+  html_notebook: default
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+# Introduction
+
+In this project, we delve into the world of motor insurance, using advanced statistical tools and models to accurately model and price insurance claims. Our aim is to improve the accuracy of assessing insurance risk.
+```{r}
+library(CASdatasets)
+library(naniar)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+data(freMTPLfreq)
+data(freMTPLsev)
+```
+
+```{r}
+dim(freMTPLfreq)
+```
+
+```{r}
+head(freMTPLsev)
+```
+
+```{r}
+head(freMTPLfreq)
+```
+## Joinging Frequency and severity data
+```{r}
+freMTPLfreq$ClaimAmount <- 0
+```
+
+```{r}
+j <- 1
+for(i in freMTPLsev$PolicyID){
+  freMTPLfreq$ClaimAmount[i] <- freMTPLsev$ClaimAmount[j]
+  j <- j + 1
+}
+```
+
+
+## Number of claims Analysis
+
+```{r}
+summary(freMTPLfreq$ClaimNb)
+```
+```{r}
+var(freMTPLfreq$ClaimNb)
+```
+
+The number of claims have a mean of 0.03916 and a variance of 0.0416
+
+```{r}
+hist(freMTPLfreq$ClaimNb,breaks=50,main="Histogram of Number of Claims",xlab = "Number of Claims")
+```
+We remark that there is an excess of zeros in the distribution of Number of claims.
+```{r}
+hist(freMTPLfreq$ClaimNb[freMTPLfreq$ClaimNb!=0],breaks=50,main="Histogram of Number of Claims",xlab = "Number of Claims")
+```
+
+
+```{r}
+sum(freMTPLfreq$ClaimNb==0)/length(freMTPLfreq$ClaimNb)
+```
+```{r}
+sum(freMTPLfreq$ClaimNb==1)/length(freMTPLfreq$ClaimNb)
+```
+96.27% of policies didn't have a claim and only 3.54% of them had exactly one claim.
+## Analysis of Driver Age
+```{r}
+summary(freMTPLfreq$DriverAge)
+```
+```{r}
+hist(freMTPLfreq$DriverAge,main="Histogram of DriverAge")
+```
+```{r}
+ggplot(freMTPLfreq, aes(x=DriverAge, y=ClaimAmount)) + 
+  geom_bar(stat = "identity", width=0.7) 
+```
+```{r}
+ClaimAmount.by.age <- freMTPLfreq %>% 
+                      group_by(DriverAge) %>% 
+                      summarize(mean.claim = mean(ClaimAmount))
+```
+
+```{r}
+ClaimAmount.by.age
+```
+```{r}
+ggplot(ClaimAmount.by.age, aes(x=DriverAge, y=mean.claim)) + 
+  geom_bar(stat = "identity", width=0.7) 
+```
+We remark that young drivers (below 25 years old) are the one who have the most sever claims.
+## Analysis of CarAge
+```{r}
+hist(freMTPLfreq$CarAge,main="Histogram of CarAge")
+```
+```{r}
+ggplot(freMTPLfreq, aes(x=CarAge, y=ClaimAmount)) + 
+  geom_bar(stat = "identity", width=0.7) 
+```
+```{r}
+ggplot(freMTPLfreq, aes(x=CarAge)) + 
+  geom_bar(stat = "count", width=0.7) 
+```
+
+```{r}
+ClaimAmount.by.CarAge <- freMTPLfreq %>% 
+                      group_by(CarAge) %>% 
+                      summarize(mean.claim = mean(ClaimAmount))
+```
+
+```{r}
+ClaimAmount.by.CarAge
+```
+```{r}
+ggplot(ClaimAmount.by.CarAge, aes(x=CarAge, y=mean.claim)) + 
+  geom_bar(stat = "identity", width=0.7) 
+```
+Older cars (above 50 years have the most sever losses) but they are fewer.
+## Brand Analysis
+```{r}
+freMTPLfreq %>%
+  mutate(Brand = fct_infreq(Brand)) %>%
+  ggplot(aes(x = Brand)) + 
+  geom_bar() + 
+  coord_flip()
+```
+The Renault, Nissan or Citroen and Japanese/Korean are the most common car in the portfolio of policies.
+```{r}
+ClaimAmount.by.CarAge <- freMTPLfreq %>% 
+                      group_by(Brand) %>% 
+                      summarize(mean.Brand = mean(ClaimAmount))
+```
+
+```{r}
+ggplot(ClaimAmount.by.CarAge,aes(x=fct_reorder(Brand, mean.Brand),y=mean.Brand)) + geom_bar(stat = "identity") + coord_flip()
+```
+The Japanese and Korean cars have the the smallest severity of claims.
+## Gas Analysis
+```{r}
+ggplot(freMTPLfreq, aes(x=Gas)) + 
+  geom_bar()
+```
+```{r}
+ggplot(freMTPLfreq, aes(x=Gas,y=ClaimAmount)) + 
+  geom_bar(stat="identity")
+```
+```{r}
+ggplot(freMTPLfreq, aes(x=Gas,y=ClaimAmount)) + 
+  geom_boxplot()
+```
+
+## Analysis of Region
+```{r}
+freMTPLfreq %>%
+  mutate(Region = fct_infreq(Region)) %>%
+  ggplot(aes(x = Region)) + 
+  geom_bar() + 
+  coord_flip()
+```
+```{r}
+ClaimAmount.by.Region <- freMTPLfreq %>% 
+                      group_by(Region) %>% 
+                      summarize(mean.Region = mean(ClaimAmount))
+```
+
+```{r}
+ggplot(ClaimAmount.by.Region,aes(x=fct_reorder(Region, mean.Region),y=mean.Region)) + geom_bar(stat = "identity") + coord_flip()
+```
+# Modeling
+## Claims frequency
+We denote the number of claims by N.
+We suggest modeling N by the (a,b,0) class of distributions : 
+$$
+{\displaystyle {k\frac {p_{k}}{p_{k-1}}}={ak}+b,\qquad k=1,2,3,4 }
+$$
+Let's test visually whether the claims data belongs to that class:
+We have 5 classes 0,1,2,3,4
+```{r}
+probs <- table(freMTPLfreq$ClaimNb)/length(freMTPLfreq$ClaimNb)
+t <- c(1:4)*(probs[2:5]/probs[1:4])
+plot(x=as.array(as.matrix(t)),y=1:4,col='blue',main="(a, b, 0) Relation Test plot",ylab="k",xlab="kp(k)/p(k-1)")
+```
+```{r}
+cor(x=as.array(as.matrix(t)),y=1:4)
+```
+$$\text{From the plot and the correlation value we conclude that there is a potential linear relation between } \\k\frac {p_{k}}{p_{k-1}} \text{ and }k$$
+Then our claims data belongs the (a,b,0) class that contains : Poisson, Binomial and Negative Binomial distributions.
+## Fitting Poisson distribution to claims data
+We denote the exposure by d, then :
+$$
+N_i \sim POIS({\lambda}d_i) \text{ for every policy i.}
+$$
+Using maximum likelihood estimation we get : 
+$$
+\lambda = \frac{1}{m} \sum_{n=1}^{m} \frac{n_i}{d_i} \\
+\text{m is the number of policies and ni the number of claims for the policy i.}
+$$
+```{r}
+m <- length(freMTPLfreq$ClaimNb)
+lambda <- mean(freMTPLfreq$ClaimNb/freMTPLfreq$Exposure)
+lambdas <- lambda*freMTPLfreq$Exposure
+pois <- 1:m
+for(i in 1:m){
+  pois[i] <- rpois(1,lambdas[i])
+}
+```
+
+```{r}
+table(pois)/m
+probs
+```
+We then compute the AIC:
+$$
+AIC = 2k - 2ln(\hat{L}) \text{ where }\hat{L}\text{ is the maximum value of the likelihood function}\\
+\hat{L} = \prod_{n=1}^{m}P(N_i=n_i)
+$$
+```{r}
+Poisson <- function(k,lambda){
+    return(exp(-lambda)*(lambda**k)/factorial(k))
+}
+```
+
+```{r}
+likelihood <- 1
+for(i in 1:m){
+  poiss <- Poisson(k = freMTPLfreq$ClaimNb[i],lambda = lambdas[i]) 
+  if(poiss>0.5){
+  likelihood <- likelihood*poiss
+  }
+}
+```
+```{r}
+AIC <- 2 - 2*log(likelihood)
+AIC
+```
+
+## Fitting Negative binomial distribution to claims data
+$$
+N_i \sim NBin({r,p}) \text{ for every policy i.}
+$$
+Using maximum likelihood estimation we get : 
+$$
+p =\frac{1}{1+ \frac{1}{m} \sum_{n=1}^{m} \frac{n_i}{r}} \\
+\text{m is the number of policies and ni the number of claims for the  policy i.}
+$$
+
+```{r}
+r <- 4
+p <- 1/(1+mean(freMTPLfreq$ClaimNb)/r)
+p
+```
+```{r}
+N.binomial <- function(k,p,r){
+  Prob <- (factorial(k+r-1)/(factorial(r-1)*factorial(k)))*(p**r)*((1-p)**k)
+  return(Prob)
+}
+```
+
+```{r}
+table(freMTPLfreq$ClaimNb)/m
+N.binomial(0:4,p,r)
+```
+```{r}
+likelihood <- 1
+for(i in 1:m){
+  Nbinom <- N.binomial(k = freMTPLfreq$ClaimNb[i],p = p, r=r) 
+  likelihood <- likelihood*Nbinom
+}
+```
+
+```{r}
+AIC <- 2 - 2*log(likelihood)
+AIC
+```
+The AIC of the poisson model is less than the AIC of the negative binomial models.
+## Feature Engineering
+### Gas Labe Encoding
+```{r}
+freMTPLfreq$Gas <- ifelse(test = freMTPLfreq$Gas == "Diesel",0,1)
+```
+### Hot encoding for Region, Brand and Power
+```{r}
+freMTPLfreq.factors <- model.matrix( ~ Region + Brand+
+Power,data=freMTPLfreq) [, -1]
+```
+
+```{r}
+head(as.data.frame(freMTPLfreq.factors))
+```
+```{r}
+freMTPLfreq.claims <- cbind(freMTPLfreq.factors,
+                freMTPLfreq[,c("Gas","ClaimNb","Exposure","CarAge","DriverAge","Density")])
+```
+
+```{r}
+freMTPLfreq.claims <- freMTPLfreq.claims %>% 
+  dplyr::rename(
+    BrandJapanese = "BrandJapanese (except Nissan) or Korean",
+    BrandGerman1 = "BrandMercedes, Chrysler or BMW",
+    BrandUSA= "BrandOpel, General Motors or Ford",
+    BrandFrance = "BrandRenault, Nissan or Citroen",
+    BrandGerman2 = "BrandVolkswagen, Audi, Skoda or Seat",
+    RegionBasseNormandie = "RegionBasse-Normandie",
+    RegionHauteNormandie = "RegionHaute-Normandie",
+    RegionIledeFrance = "RegionIle-de-France",
+    RegionNordPasdeCalais = "RegionNord-Pas-de-Calais",
+    RegionPaysdelaLoire = "RegionPays-de-la-Loire",
+    RegionPoitouCharentes = "RegionPoitou-Charentes"
+    )
+```
+
+
+## Generalized Linear Models
+```{r}
+library(MASS)
+library(countreg)
+```
+### Modelling number of claims with Poisson regression models
+the link function for poisson regression is the log:
+$$
+ N_i ∼ POI(d_i⋅λ_i)=POI(exp(x_i'β+log(d_i)))
+$$
+We take the log of the exposure
+```{r}
+freMTPLfreq.claims$Exposure <- log(freMTPLfreq.claims$Exposure)
+```
+
+
+```{r}
+g.poisson <- glm(formula = ClaimNb ~ .,data=freMTPLfreq.claims, family = poisson())
+```
+
+```{r}
+g.poisson$aic
+```
+```{r}
+BIC(g.poisson)
+```
+
+```{r}
+g.poisson$deviance
+```
+
+```{r}
+pchisq(g.poisson$deviance, df=g.poisson$df.residual, lower.tail=FALSE)
+```
+
+
+```{r}
+g.poisson$deviance/g.poisson$df.residual
+```
+The ratio of Residual deviance/Degrees of freedom = 0.2539613 which is less than 1, indicating that the model is not overdispersed.
+
+```{r}
+par(mfrow=c(2,2))
+plot(g.poisson)
+```
+
+```{r}
+plot(g.poisson,5)
+```
+```{r}
+plot(g.poisson,6)
+```
+
+For modeling the claims data we used poisson distribution however 
+$$
+E(N) \neq Var(N)
+$$
+Which means data the claims are overdispersed.
+
+```{r}
+mean(freMTPLfreq.claims$ClaimNb)
+```
+```{r}
+var(freMTPLfreq.claims$ClaimNb)
+```
+So we suggest using quasi poisson regression
+```{r}
+g.poisson.quasi <- glm(formula = ClaimNb ~ .,data=freMTPLfreq.claims, family = quasipoisson)
+```
+
+```{r}
+g.poisson.quasi$aic
+```
+```{r}
+BIC(g.poisson.quasi)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(g.poisson.quasi)
+```
+```{r}
+g.poisson.quasi$deviance
+```
+
+```{r}
+pchisq(g.poisson.quasi$deviance, df=g.poisson.quasi$df.residual, lower.tail=FALSE)
+```
+
+### Modelling number of claims with Negative Binomial regression
+the link function for Negative Binomial regression is the log:
+
+```{r}
+g.NBinom <- glm.nb(formula = ClaimNb ~ .,data=freMTPLfreq.claims)
+```
+
+```{r}
+g.NBinom$aic
+```
+```{r}
+BIC(g.NBinom)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(g.NBinom)
+```
+```{r}
+g.NBinom$deviance
+```
+
+```{r}
+pchisq(g.NBinom$deviance, df=g.NBinom$df.residual, lower.tail=FALSE)
+```
+
+#Zero Inflation Poisson model with offset
+```{r}
+suppressWarnings(library(pscl))
+```
+
+```{r}
+zip <- zeroinfl(ClaimNb ~ .,data=freMTPLfreq.claims,dist = "poisson",link="logit")
+```
+```{r}
+c(AIC(zip),BIC(zip))
+```
+
+```{r}
+summary(zip)
+```
+
+#Zero Inflation Negative Binomial model with offset
+```{r}
+zinb <- zeroinfl(ClaimNb ~ .,data=freMTPLfreq.claims,dist = "negbin",link= "logit")
+```
+
+```{r}
+c(AIC(zinb),BIC(zinb))
+```
+
+#Hurdle Negative Binomial model with offset
+```{r}
+hurdlenb <- hurdle(ClaimNb ~ .,data=freMTPLfreq.claims,dist ="negbin",zero.dist = "negbin",link= "logit")
+```
+
+
+```{r}
+c(AIC(hurdlenb),BIC(hurdlenb))
+```
+
+```{r}
+rootogram(hurdlenb,max = 4,main="Negative Binomial Hurdle") 
+```
+
+#Hurdle Poisson model with offset
+```{r}
+hurdlepoisson <- hurdle(ClaimNb ~ .,data=freMTPLfreq.claims,dist ="poisson",zero.dist = "poisson",link= "logit")
+
+```
+```{r}
+c(AIC(hurdlepoisson),BIC(hurdlepoisson))
+```
+We conclude that the Zero Inflation Negative Binomial model has the smallest AIC.
+## Generalized Additive Models
+```{r}
+suppressWarnings(library(gam))
+suppressWarnings(library(splines))
+suppressWarnings(library(mgcv))
+```
+
+```{r}
+plot(freMTPLfreq.claims$CarAge,freMTPLfreq.claims$ClaimNb,xlab="Car Age",ylab="ClaimNb")
+```
+```{r}
+plot(freMTPLfreq.claims$DriverAge,freMTPLfreq.claims$ClaimNb,xlab="DriverAge",ylab="Claim Amount")
+```
+
+```{r}
+plot(freMTPLfreq.claims$Exposure,freMTPLfreq.claims$ClaimNb,xlab="Log Exposure",ylab="Claim Amount")
+```
+```{r}
+plot(freMTPLfreq.claims$Density,freMTPLfreq.claims$ClaimNb,xlab="Density",ylab="Claim Amount")
+```
+We start with a gam model without categorical varibales:
+```{r}
+GAM.model <- gam(formula = ClaimNb ~ s(CarAge) + s(DriverAge) + s(Density) + s(Exposure),family = poisson(link = "log"),data=freMTPLfreq.claims)
+```
+
+```{r}
+par(mfrow=c(2,2))
+plot(GAM.model,se=TRUE)
+```
+```{r}
+summary(GAM.model)
+```
+
+
+```{r}
+colnames(freMTPLfreq.claims)
+```
+
+```{r}
+GAM.model.allvariables <- gam(formula = ClaimNb ~ BrandJapanese + BrandGerman1 +BrandUSA +BrandFrance+BrandGerman2+ RegionBasseNormandie+ RegionBretagne+RegionCentre+RegionHauteNormandie+RegionIledeFrance+RegionLimousin+
+RegionNordPasdeCalais+RegionPaysdelaLoire+RegionPoitouCharentes+Powere+Powerf+Powerg+Powerh+Poweri+Powerj+Powerk+Powerl+Powerm+Powern+Powere+Gas+s(CarAge) + s(DriverAge) + s(Density) + s(Exposure), family = poisson(link = "log"), data = freMTPLfreq.claims)
+
+```
+
+```{r}
+summary(GAM.model.allvariables)
+```
+
+
+
+```{r}
+c(AIC(GAM.model.allvariables),AIC(GAM.model))
+```
+```{r}
+anova(GAM.model.allvariables,GAM.model,test="Chisq")
+```
+We conclude that adding the categorical variables has slightly improved the model.
+```{r}
+GAM.model$deviance
+```
+```{r}
+GAM.model.allvariables$deviance
+```
+
+```{r}
+GAM.model$aic
+```
+```{r}
+GAM.model.allvariables$aic
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+gam.check(GAM.model,pch=19,cex=.3)
+```
+```{r}
+par(mfrow=c(2,2))
+gam.check(GAM.model.allvariables,pch=19,cex=.3)
+```
+### Comparing the models
+```{r}
+claims.models <- data.frame(
+  model = c("g.poisson", "g.poisson.quasi", "g.NBinom", "zip", "zinb", "hurdlenb", "hurdlepoisson", "GAM.model", "GAM.model.allvariables"),
+  AIC = c(AIC(g.poisson), AIC(g.poisson.quasi), AIC(g.NBinom), AIC(zip), AIC(zinb), AIC(hurdlenb), AIC(hurdlepoisson), AIC(GAM.model), AIC(GAM.model.allvariables)),
+  BIC = c(BIC(g.poisson), BIC(g.poisson.quasi), BIC(g.NBinom), BIC(zip), BIC(zinb), BIC(hurdlenb), BIC(hurdlepoisson), BIC(GAM.model), BIC(GAM.model.allvariables)),
+  Deviance = c(g.poisson$deviance, g.poisson.quasi$deviance, g.NBinom$deviance, 'Null', 'Null', 'Null', 'Null', GAM.model$deviance, GAM.model$deviance)
+)
+```
+
+```{r}
+claims.models
+```
+We conclude that the GAM model accounting for all variables have the lowest AIC,BIC and Deviance.
+
+Now we use this model to predict E(N)
+```{r}
+expected.ClaimNb <- GAM.model.allvariables$fitted.values
+```
+
+## Modeling Severity
+We denote by X the amount of claims.
+and we have
+$$
+X = \sum_{k=1}^{N} U_k\\
+\text{Where } U_k \text{ represent individual claim sizes for the kth claim}
+$$
+
+```{r}
+hist(freMTPLsev$ClaimAmount,breaks=1000)
+```
+The tails distribution of X are heavy.
+It is difficult to fit a distribution to this data, so we need to do some transformation.
+```{r}
+mean(freMTPLsev$ClaimAmount)
+var(freMTPLsev$ClaimAmount)
+```
+```{r}
+library(moments)
+skewness(freMTPLsev$ClaimAmount)
+kurtosis(freMTPLsev$ClaimAmount)
+```
+The severity distribution have high skewness and high kurtosis.
+```{r}
+hist(log(freMTPLsev$ClaimAmount),xlab = "Log of Claims Cmount",main="Histogram of Log of Claims Amount")
+```
+We suggest fit lognormal to the log severity data
+$$
+log(X) \sim LN(\mu,\sigma)
+$$
+Using maximum likelihood estimation we get
+$$
+\mu = \frac{1}{n} \sum_{i=1}^{n} ln(y_i)\\
+\sigma = \sqrt{\frac{1}{n} \sum_{i=1}^{n} (ln(y_i)-\mu)^2}\\
+\text{Where n is the number of policies who have reported claims, and }y_i=log(x_i)
+$$
+```{r}
+y <- log(freMTPLsev$ClaimAmount)
+n <- length(freMTPLsev$ClaimAmount)
+mu <- mean(log(y))
+sigma <- sqrt(mean((log(y)-mu)**2))
+```
+
+```{r}
+Log.normal <- function(y,mu,sigma){
+  a <- y*sigma*sqrt(2*pi)
+  b <- exp(-((log(y)-mu)**2)/(2*(sigma**2)))
+  return(b/a)
+}
+```
+
+```{r}
+hist(y,freq=F,breaks=70)
+x <- seq(from=min(y),to=max(y),length.out=1000)
+lines(x = x,Log.normal(x,mu,sigma),col="blue")
+```
+```{r}
+plot(ecdf(y))
+lines(x,pnorm(log(x),mu,sigma),col='blue')
+```
+Q-Q plot
+```{r}
+plot(sort(y),exp(qnorm(seq(from=0,to=1,length.out=n),mu,sigma)),xlab="Emperical quantiles",ylab="Theoritical quantiles")
+abline(0,1,col="blue",lwd=2)
+```
+```{r}
+likelihood <- 1
+for(i in 1:n){
+  lnorm <- Log.normal(y[i],mu,sigma) 
+  likelihood <- likelihood*lnorm
+}
+```
+
+```{r}
+AIC <- 2*4 - 2*log(likelihood)
+AIC
+```
+Fitting gamma distribution
+```{r}
+library(MASS)
+library(fitdistrplus)
+```
+
+```{r}
+fitgamma <- fitdist(y, distr = "gamma", method = "mle")
+```
+```{r}
+summary(fitgamma)
+```
+```{r}
+par(mar=c(1, 1, 1, 1))
+plot(fitgamma)
+```
+To choose between the lognormal and gamma distribution we rely on AIC
+```{r}
+fitlnorm <- fitdist(y, distr = "lnorm", method = "mle")
+```
+```{r}
+fitlnorm$aic
+fitgamma$aic
+```
+gamma fitting has the smallest AIC, then this distribution is more convenable for log(X).
+## simulation of severities
+```{r}
+fitgamma$estimate
+```
+
+```{r}
+gamma.sapmle <- rgamma(n,shape=fitgamma$estimate[1],rate = fitgamma$estimate[2])
+```
+
+```{r}
+hist(exp(gamma.sapmle),breaks=10000)
+```
+QQ plot
+```{r}
+plot(sort(exp(gamma.sapmle)),sort(exp(y)))
+abline(0,1,lwd=2,col="blue")
+```
+## Gamma Hurdle Model
+
+```{r}
+ClaimAmount <- freMTPLfreq$ClaimAmount
+freMTPLfreq.claimsize <- cbind(freMTPLfreq.claims,ClaimAmount)
+```
+```{r}
+freMTPLfreq.claimsize <- freMTPLfreq.claimsize[!names(freMTPLfreq.claimsize) %in% c("ClaimNb")]
+```
+
+We add a binary variable varibale to account for zero Claim Amount
+```{r}
+freMTPLfreq.claimsize <- freMTPLfreq.claimsize %>% 
+  mutate(ClaimAmount.binary = ifelse(ClaimAmount > 0, 1, 0))
+```
+
+
+```{r}
+colnames(freMTPLfreq.claimsize)
+```
+
+
+```{r}
+hist(freMTPLfreq$ClaimAmount,breaks = 100)
+```
+```{r}
+hurdle.binomial <- glm(ClaimAmount.binary ~ ., 
+                        data = subset(freMTPLfreq.claimsize, select = -c(ClaimAmount)),                         family = "binomial")
+```
+
+```{r}
+hurdle.gamma <- glm(ClaimAmount ~ ., 
+                    data = subset(freMTPLfreq.claimsize, ClaimAmount > 0, select = -c(ClaimAmount.binary)),
+                    family = Gamma(link = "log"))
+```
+
+```{r}
+summary(hurdle.gamma)
+```
+Since we've already fitted log(X) using gamma distribution, we choose log(X) for our glm model.
+```{r}
+log.hurdle.gamma <- glm(log(ClaimAmount) ~ ., 
+                     data = subset(freMTPLfreq.claimsize, ClaimAmount > 0, select = -c(ClaimAmount.binary)),family = Gamma(link = "log"))
+```
+
+```{r}
+summary(log.hurdle.gamma)
+```
+Now we need to predict the expect claim amount for all policies by multiplying the gamma model prediction by the binomial model prediction.
+```{r}
+expected.claim.amount <- exp(predict(log.hurdle.gamma,subset(freMTPLfreq.claimsize, select = -c(ClaimAmount,ClaimAmount.binary)),type="response"))*predict(hurdle.binomial,type="response")
+```
+
+## Pricing risk premium
+Finally after we modeled E(N) and E(X) we can price the risk premium by multiplying those two expected value : price = E(N)*E(X)
+```{r}
+risk.premium <- expected.claim.amount*expected.ClaimNb
+```
+
+# Conclusion
+
+In conclusion, our project centered on the modeling and pricing of French motor insurance claims, employing statistical methodologies tailored to the intricacies of the data. We harnessed the Poisson distribution to capture claim frequency and the Gamma distribution to represent the log of severities. For modeling claims, we explored a range of modeling techniques, including Generalized Linear Models (GLM) with both Poisson and Negative Binomial link functions, as well as Generalized Additive Models (GAM), to estimate claim frequencies. Additionally, we applied zero-inflated and hurdle models to address specific characteristics of the data. For severities, we utilized the Gamma Hurdle model to provide a comprehensive pricing framework.
+
+
+
+
+
